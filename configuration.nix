@@ -261,4 +261,58 @@
       };
     };
   };
+
+  # Stay awake with the lid closed while docked: AC power + a real keyboard and mouse
+  systemd.services.docked-lid-inhibit = {
+    description = "Hold a lid-switch inhibitor while docked";
+
+    serviceConfig.ExecStart = "${pkgs.systemd}/bin/systemd-inhibit --what=handle-lid-switch --who=docked-lid --why='External keyboard, mouse and AC power present' --mode=block ${pkgs.coreutils}/bin/sleep infinity";
+  };
+
+  # Re-evaluated by udev whenever an input device or the power supply changes
+  systemd.services.docked-lid-check = {
+    description = "Start or stop the docked lid inhibitor based on AC and input devices";
+    wantedBy = [ "multi-user.target" ];
+    path = with pkgs; [
+      systemd
+      coreutils
+      gnugrep
+    ];
+
+    serviceConfig.Type = "oneshot";
+
+    script = ''
+      kbd=0
+      mouse=0
+
+      for dev in /sys/class/input/event*; do
+        props=$(udevadm info --query=property --path="$dev" 2>/dev/null) || continue
+
+        # Ignore uinput devices (keyd, deskflow) and the built-in Apple keyboard/trackpad.
+        # Bluetooth peripherals live under /devices/virtual/misc/uhid and still count.
+        if echo "$props" | grep -qE '^(DEVPATH=/devices/virtual/input/|ID_MODEL=Apple_Internal_Keyboard___Trackpad$)'; then
+          continue
+        fi
+
+        if echo "$props" | grep -q '^ID_INPUT_KEYBOARD=1$'; then kbd=1; fi
+        if echo "$props" | grep -q '^ID_INPUT_MOUSE=1$'; then mouse=1; fi
+      done
+
+      ac=0
+      for online in /sys/class/power_supply/*/online; do
+        if [ "$(cat "$online")" = 1 ]; then ac=1; fi
+      done
+
+      if [ "$kbd$mouse$ac" = 111 ]; then
+        systemctl start docked-lid-inhibit.service
+      else
+        systemctl stop docked-lid-inhibit.service
+      fi
+    '';
+  };
+
+  services.udev.extraRules = ''
+    SUBSYSTEM=="input", KERNEL=="event*", ACTION=="add|remove", TAG+="systemd", ENV{SYSTEMD_WANTS}+="docked-lid-check.service"
+    SUBSYSTEM=="power_supply", ACTION=="change", TAG+="systemd", ENV{SYSTEMD_WANTS}+="docked-lid-check.service"
+  '';
 }

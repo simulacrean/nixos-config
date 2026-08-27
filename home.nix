@@ -10,9 +10,14 @@
   # Private personal data (emails, real names) lives outside this repo
   imports = [ inputs.nixos-private.homeModule ];
 
-  # Active GNOME extensions
   dconf.settings = {
 
+    # Docked with the lid closed still idle-suspends after 15 min otherwise
+    "org/gnome/settings-daemon/plugins/power" = {
+      sleep-inactive-ac-type = "nothing";
+    };
+
+    # Active GNOME extensions
     "org/gnome/shell" = {
 
       enabled_extensions = [
